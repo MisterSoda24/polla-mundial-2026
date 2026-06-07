@@ -96,33 +96,7 @@
 </head>
 <body>
 <div class="container">
-
-  <!-- CONFIG SCREEN -->
-  <div id="config-screen" style="display:none;padding-top:1rem">
-    <div style="margin-bottom:1.25rem">
-      <h1 style="font-size:21px;font-weight:600;margin-bottom:3px">⚽ Polla Mundialista 2026</h1>
-      <p style="font-size:13px;color:var(--text2)">Configuración inicial — solo necesitas hacerlo una vez</p>
-    </div>
-    <div class="card">
-      <p class="section-label">Conectar con Google Sheets</p>
-      <div class="field">
-        <label>URL del Apps Script (Web App)</label>
-        <input type="text" id="cfg-script-url" placeholder="https://script.google.com/macros/s/.../exec" />
-      </div>
-      <div class="field">
-        <label>Contraseña de administrador</label>
-        <input type="password" id="cfg-admin-pass" placeholder="La misma que pusiste en el script" />
-      </div>
-      <button class="btn btn-primary btn-full" onclick="saveConfig()">Guardar y continuar →</button>
-    </div>
-    <div class="notice">
-      <span>📋</span>
-      <span>Sigue las instrucciones del README para crear el Google Sheet y el Apps Script antes de continuar.</span>
-    </div>
-  </div>
-
-  <!-- MAIN APP -->
-  <div id="main-app" style="display:none">
+  <div id="main-app">
     <header>
       <h1>⚽ Polla Mundialista 2026</h1>
       <p>72 partidos · 12 grupos · 3 pts marcador exacto · 1 pt resultado correcto</p>
@@ -130,15 +104,18 @@
     <div class="tabs">
       <button class="tab active" onclick="showTab('standings',this)">🏆 Posiciones</button>
       <button class="tab" onclick="showTab('predict',this)">✏️ Mis picks</button>
-      <button class="tab" onclick="showTab('results',this)">⏱ Resultados</button>
+      <button class="tab" onclick="showTab('results',this)">🔑 Admin</button>
     </div>
     <div id="tab-standings" class="panel active"><div id="standings-content"></div></div>
     <div id="tab-predict" class="panel"><div id="predict-content"></div></div>
     <div id="tab-results" class="panel"><div id="results-content"></div></div>
   </div>
-
 </div>
 <script>
+// ─── CONFIG PRECARGADA ───────────────────────────────────────────────
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwvtWUB7htEG0LXN75g_X7teaaX_j6UPlmUR_iRTprPUB4wE1kvfv1V0jh4HrgD9NiM/exec";
+const ADMIN_PASSWORD = "BUCAROS123";
+
 const MATCHES = [
   {id:1,a:'México',b:'Sudáfrica',g:'A',j:1},{id:2,a:'Corea del Sur',b:'Chequia',g:'A',j:1},
   {id:3,a:'México',b:'Corea del Sur',g:'A',j:2},{id:4,a:'Chequia',b:'Sudáfrica',g:'A',j:2},
@@ -179,46 +156,21 @@ const MATCHES = [
 ];
 const GROUPS = ['A','B','C','D','E','F','G','H','I','J','K','L'];
 
-let CFG = JSON.parse(localStorage.getItem('polla26_cfg') || 'null');
 let SESSION = JSON.parse(localStorage.getItem('polla26_session') || 'null');
 let isAdmin = false;
 let remoteData = { predictions:{}, results:{} };
 let predGroupFilter = 'ALL';
 let resGroupFilter = 'ALL';
 
-function saveConfig() {
-  const scriptUrl = document.getElementById('cfg-script-url').value.trim();
-  const adminPass = document.getElementById('cfg-admin-pass').value.trim();
-  if (!scriptUrl || !adminPass) { alert('Completa todos los campos.'); return; }
-  CFG = { scriptUrl, adminPass };
-  localStorage.setItem('polla26_cfg', JSON.stringify(CFG));
-  bootApp();
-}
-
-async function bootApp() {
-  if (!CFG) {
-    document.getElementById('config-screen').style.display = 'block';
-    document.getElementById('main-app').style.display = 'none';
-    return;
-  }
-  document.getElementById('config-screen').style.display = 'none';
-  document.getElementById('main-app').style.display = 'block';
-  await loadRemoteData();
-  renderStandings();
-  renderPredictTab();
-  renderResultsTab();
-}
-
 async function loadRemoteData() {
   try {
-    const res = await fetch(CFG.scriptUrl + '?action=getData&t=' + Date.now());
-    const json = await res.json();
-    remoteData = json;
+    const res = await fetch(SCRIPT_URL + '?action=getData&t=' + Date.now());
+    remoteData = await res.json();
   } catch(e) { console.warn('Error cargando datos:', e); }
 }
 
 async function postToSheet(payload) {
-  const res = await fetch(CFG.scriptUrl, {
+  const res = await fetch(SCRIPT_URL, {
     method:'POST',
     headers:{'Content-Type':'text/plain'},
     body: JSON.stringify(payload)
@@ -226,35 +178,34 @@ async function postToSheet(payload) {
   return res.json();
 }
 
-function getOutcome(a, b) {
-  if (a===''||b===''||a==null||b==null) return null;
-  const na=parseInt(a), nb=parseInt(b);
+function getOutcome(a,b) {
+  if(a===''||b===''||a==null||b==null) return null;
+  const na=parseInt(a),nb=parseInt(b);
   return na>nb?'A':nb>na?'B':'E';
 }
 
 function calcPoints(player) {
-  const preds = remoteData.predictions?.[player] || {};
-  const results = remoteData.results || {};
-  let total=0, exact=0, correct=0;
-  MATCHES.forEach(m => {
-    const r=results[m.id], p=preds[m.id];
-    if (!r||!p||p.a===''||p.b==='') return;
-    const ro=getOutcome(r.a,r.b), po=getOutcome(p.a,p.b);
-    if (String(r.a)===String(p.a)&&String(r.b)===String(p.b)) { total+=3; exact++; }
-    else if (ro&&po&&ro===po) { total+=1; correct++; }
+  const preds=remoteData.predictions?.[player]||{};
+  const results=remoteData.results||{};
+  let total=0,exact=0,correct=0;
+  MATCHES.forEach(m=>{
+    const r=results[m.id],p=preds[m.id];
+    if(!r||!p||p.a===''||p.b==='') return;
+    const ro=getOutcome(r.a,r.b),po=getOutcome(p.a,p.b);
+    if(String(r.a)===String(p.a)&&String(r.b)===String(p.b)){total+=3;exact++;}
+    else if(ro&&po&&ro===po){total+=1;correct++;}
   });
   return {total,exact,correct};
 }
 
 async function renderStandings() {
-  const el = document.getElementById('standings-content');
-  el.innerHTML = `<div style="text-align:center;padding:2rem"><span class="spinner"></span></div>`;
+  const el=document.getElementById('standings-content');
+  el.innerHTML=`<div style="text-align:center;padding:2rem"><span class="spinner"></span></div>`;
   await loadRemoteData();
-  const played = MATCHES.filter(m=>remoteData.results?.[m.id]).length;
-  const pct = Math.round(played/72*100);
-  const players = Object.keys(remoteData.predictions||{});
-
-  let html = `
+  const played=MATCHES.filter(m=>remoteData.results?.[m.id]).length;
+  const pct=Math.round(played/72*100);
+  const players=Object.keys(remoteData.predictions||{});
+  let html=`
     <div class="stat-row">
       <div class="stat-box"><div class="stat-num">${played}</div><div class="stat-lbl">jugados</div></div>
       <div class="stat-box"><div class="stat-num">${72-played}</div><div class="stat-lbl">por jugar</div></div>
@@ -264,26 +215,25 @@ async function renderStandings() {
       <div class="progress-top"><span>Progreso del torneo</span><span>${pct}%</span></div>
       <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
     </div>`;
-
-  if (!players.length) {
-    html += `<div class="empty"><div class="big">👥</div>Aún no hay participantes.</div>`;
+  if(!players.length){
+    html+=`<div class="empty"><div class="big">👥</div>Aún no hay participantes registrados.</div>`;
   } else {
-    const scores = players.map(p=>({name:p,...calcPoints(p)})).sort((a,b)=>b.total-a.total||b.exact-a.exact);
-    html += `<div class="card"><table class="leaderboard"><thead><tr><th>#</th><th>Jugador</th><th>Pts</th><th style="color:var(--green)">Exactos</th><th style="color:var(--blue)">Resultado</th></tr></thead><tbody>`;
+    const scores=players.map(p=>({name:p,...calcPoints(p)})).sort((a,b)=>b.total-a.total||b.exact-a.exact);
+    html+=`<div class="card"><table class="leaderboard"><thead><tr><th>#</th><th>Jugador</th><th>Pts</th><th style="color:var(--green)">Exactos</th><th style="color:var(--blue)">Resultado</th></tr></thead><tbody>`;
     scores.forEach((s,i)=>{
       html+=`<tr><td><span class="rank-badge rank-${i+1}">${i+1}</span></td><td style="font-weight:500">${s.name}</td><td><span class="pts-big">${s.total}</span></td><td style="color:var(--green);font-weight:500">${s.exact}</td><td style="color:var(--blue);font-weight:500">${s.correct}</td></tr>`;
     });
-    html += `</tbody></table></div>`;
+    html+=`</tbody></table></div>`;
   }
-  html += `<button class="btn btn-full" onclick="renderStandings()" style="margin-top:0">↻ Actualizar tabla</button>`;
-  el.innerHTML = html;
+  html+=`<button class="btn btn-full" onclick="renderStandings()" style="margin-top:0">↻ Actualizar tabla</button>`;
+  el.innerHTML=html;
 }
 
 function renderPredictTab() {
-  const el = document.getElementById('predict-content');
-  if (SESSION?.locked) { renderLockedView(); return; }
-  if (!SESSION?.name) {
-    el.innerHTML = `
+  const el=document.getElementById('predict-content');
+  if(SESSION?.locked){renderLockedView();return;}
+  if(!SESSION?.name){
+    el.innerHTML=`
       <div class="card">
         <p class="section-label">Registrarse</p>
         <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.5">
@@ -301,32 +251,21 @@ function renderPredictTab() {
 }
 
 async function registerPlayer() {
-  const name = document.getElementById('reg-name').value.trim();
-  if (!name) { alert('Ingresa tu nombre.'); return; }
+  const name=document.getElementById('reg-name').value.trim();
+  if(!name){alert('Ingresa tu nombre.');return;}
   await loadRemoteData();
-  if (remoteData.predictions?.[name]) {
-    SESSION = {name, locked:true};
-    localStorage.setItem('polla26_session', JSON.stringify(SESSION));
-    renderLockedView();
-    return;
+  if(remoteData.predictions?.[name]){
+    SESSION={name,locked:true};
+    localStorage.setItem('polla26_session',JSON.stringify(SESSION));
+    renderLockedView();return;
   }
-  SESSION = {name, locked:false};
-  localStorage.setItem('polla26_session', JSON.stringify(SESSION));
+  SESSION={name,locked:false};
+  localStorage.setItem('polla26_session',JSON.stringify(SESSION));
   renderPredictForm();
 }
 
-function buildGroupFilter(id, active, cb) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  let html = `<button class="gf-btn ${active==='ALL'?'on':''}" onclick="(${cb})('ALL')">Todos</button>`;
-  GROUPS.forEach(g=>{
-    html+=`<button class="gf-btn ${active===g?'on':''}" onclick="(${cb})('${g}')">Grupo ${g}</button>`;
-  });
-  el.innerHTML = html;
-}
-
 function renderPredictForm() {
-  document.getElementById('predict-content').innerHTML = `
+  document.getElementById('predict-content').innerHTML=`
     <div class="notice">
       <span>✏️</span>
       <span>Hola <strong>${SESSION.name}</strong>. Ingresa tus predicciones y envíalas. <strong>No podrás editarlas después.</strong></span>
@@ -335,15 +274,23 @@ function renderPredictForm() {
     <div id="pred-wrap"></div>
     <button class="btn btn-primary btn-full" id="submit-btn" onclick="submitPredictions()">🔒 Enviar y bloquear predicciones</button>
     <button class="btn btn-full muted-btn" onclick="SESSION=null;localStorage.removeItem('polla26_session');renderPredictTab()">No soy ${SESSION.name}</button>`;
-  buildGroupFilter('pred-gf', predGroupFilter, function(g){predGroupFilter=g;buildGroupFilter('pred-gf',g,arguments.callee);renderPredMatches();});
+  buildGroupFilter('pred-gf', predGroupFilter, g=>{predGroupFilter=g;buildGroupFilter('pred-gf',g,arguments.callee);renderPredMatches();});
   renderPredMatches();
 }
 
+function buildGroupFilter(id, active, cb) {
+  const el=document.getElementById(id);
+  if(!el) return;
+  let html=`<button class="gf-btn ${active==='ALL'?'on':''}" onclick="(${cb})('ALL')">Todos</button>`;
+  GROUPS.forEach(g=>{html+=`<button class="gf-btn ${active===g?'on':''}" onclick="(${cb})('${g}')">Grupo ${g}</button>`;});
+  el.innerHTML=html;
+}
+
 function renderPredMatches() {
-  const wrap = document.getElementById('pred-wrap');
-  if (!wrap) return;
-  const filtered = MATCHES.filter(m=>predGroupFilter==='ALL'||m.g===predGroupFilter);
-  const byG = {};
+  const wrap=document.getElementById('pred-wrap');
+  if(!wrap) return;
+  const filtered=MATCHES.filter(m=>predGroupFilter==='ALL'||m.g===predGroupFilter);
+  const byG={};
   filtered.forEach(m=>{(byG[m.g]=byG[m.g]||[]).push(m);});
   let html='';
   Object.entries(byG).forEach(([g,ms])=>{
@@ -374,31 +321,31 @@ async function submitPredictions() {
   if(missing>0&&!confirm(`Faltan ${missing} marcadores. ¿Enviar de todas formas? Los vacíos no sumarán puntos.`)) return;
   if(!confirm(`¿Confirmas enviar tus predicciones? Una vez enviadas NO podrás cambiarlas.`)) return;
   const btn=document.getElementById('submit-btn');
-  btn.disabled=true; btn.innerHTML=`<span class="spinner"></span> Enviando...`;
-  try {
-    const res = await postToSheet({action:'savePredictions',player:SESSION.name,predictions:preds});
+  btn.disabled=true;btn.innerHTML=`<span class="spinner"></span> Enviando...`;
+  try{
+    const res=await postToSheet({action:'savePredictions',player:SESSION.name,predictions:preds});
     if(res.ok){
       SESSION.locked=true;
       localStorage.setItem('polla26_session',JSON.stringify(SESSION));
       await loadRemoteData();
       renderLockedView();
     } else {
-      btn.disabled=false; btn.innerHTML='🔒 Enviar y bloquear predicciones';
+      btn.disabled=false;btn.innerHTML='🔒 Enviar y bloquear predicciones';
       alert('Error: '+(res.error||'intenta de nuevo'));
     }
-  } catch(e){
-    btn.disabled=false; btn.innerHTML='🔒 Enviar y bloquear predicciones';
+  }catch(e){
+    btn.disabled=false;btn.innerHTML='🔒 Enviar y bloquear predicciones';
     alert('Error de conexión. Intenta de nuevo.');
   }
 }
 
 function renderLockedView() {
-  const preds = remoteData.predictions?.[SESSION.name]||{};
-  const results = remoteData.results||{};
-  let html = `
+  const preds=remoteData.predictions?.[SESSION.name]||{};
+  const results=remoteData.results||{};
+  let html=`
     <div class="notice success"><span>✅</span><span><strong>${SESSION.name}</strong>, tus predicciones están enviadas y bloqueadas. ¡Buena suerte!</span></div>
     <div class="group-filter" id="locked-gf"></div>`;
-  const filtered = MATCHES.filter(m=>predGroupFilter==='ALL'||m.g===predGroupFilter);
+  const filtered=MATCHES.filter(m=>predGroupFilter==='ALL'||m.g===predGroupFilter);
   const byG={};
   filtered.forEach(m=>{(byG[m.g]=byG[m.g]||[]).push(m);});
   Object.entries(byG).forEach(([g,ms])=>{
@@ -424,9 +371,8 @@ function renderLockedView() {
     });
     html+=`</div>`;
   });
-  html+=`<button class="btn btn-full muted-btn" onclick="SESSION=null;localStorage.removeItem('polla26_session');renderPredictTab()">Ver mis picks como otro jugador</button>`;
+  html+=`<button class="btn btn-full muted-btn" onclick="SESSION=null;localStorage.removeItem('polla26_session');renderPredictTab()">Ver picks con otro nombre</button>`;
   document.getElementById('predict-content').innerHTML=html;
-  // rebuild filter
   const gfEl=document.getElementById('locked-gf');
   let gfHtml=`<button class="gf-btn ${predGroupFilter==='ALL'?'on':''}" onclick="predGroupFilter='ALL';renderLockedView()">Todos</button>`;
   GROUPS.forEach(g=>{gfHtml+=`<button class="gf-btn ${predGroupFilter===g?'on':''}" onclick="predGroupFilter='${g}';renderLockedView()">Grupo ${g}</button>`;});
@@ -449,7 +395,7 @@ function renderResultsTab() {
 }
 
 function checkAdmin(){
-  if(document.getElementById('admin-pass').value===CFG.adminPass){isAdmin=true;renderAdminPanel();}
+  if(document.getElementById('admin-pass').value===ADMIN_PASSWORD){isAdmin=true;renderAdminPanel();}
   else alert('Contraseña incorrecta.');
 }
 
@@ -460,7 +406,6 @@ function renderAdminPanel(){
     <div id="res-wrap"></div>
     <button class="btn btn-primary btn-full" id="res-btn" onclick="saveResults()">💾 Guardar resultados</button>
     <button class="btn btn-full muted-btn" onclick="isAdmin=false;renderResultsTab()">Cerrar sesión admin</button>`;
-  // build res group filter
   const resGfEl=document.getElementById('res-gf');
   let rgfHtml=`<button class="gf-btn ${resGroupFilter==='ALL'?'on':''}" onclick="resGroupFilter='ALL';renderAdminPanel()">Todos</button>`;
   GROUPS.forEach(g=>{rgfHtml+=`<button class="gf-btn ${resGroupFilter===g?'on':''}" onclick="resGroupFilter='${g}';renderAdminPanel()">Grupo ${g}</button>`;});
@@ -470,7 +415,7 @@ function renderAdminPanel(){
 
 function renderResMatches(){
   const wrap=document.getElementById('res-wrap');
-  if(!wrap)return;
+  if(!wrap) return;
   const filtered=MATCHES.filter(m=>resGroupFilter==='ALL'||m.g===resGroupFilter);
   const byG={};
   filtered.forEach(m=>{(byG[m.g]=byG[m.g]||[]).push(m);});
@@ -501,19 +446,19 @@ async function saveResults(){
     if(a!==''&&b!=='') results[m.id]={a,b};
   });
   const btn=document.getElementById('res-btn');
-  btn.disabled=true; btn.innerHTML=`<span class="spinner"></span> Guardando...`;
+  btn.disabled=true;btn.innerHTML=`<span class="spinner"></span> Guardando...`;
   try{
-    const res=await postToSheet({action:'saveResults',adminPass:CFG.adminPass,results});
-    btn.disabled=false; btn.innerHTML='💾 Guardar resultados';
-    if(res.ok){ remoteData.results=results; alert('✓ Resultados guardados.'); renderStandings(); }
+    const res=await postToSheet({action:'saveResults',adminPass:ADMIN_PASSWORD,results});
+    btn.disabled=false;btn.innerHTML='💾 Guardar resultados';
+    if(res.ok){remoteData.results=results;alert('✓ Resultados guardados.');renderStandings();}
     else alert('Error: '+(res.error||'intenta de nuevo'));
   }catch(e){
-    btn.disabled=false; btn.innerHTML='💾 Guardar resultados';
+    btn.disabled=false;btn.innerHTML='💾 Guardar resultados';
     alert('Error de conexión.');
   }
 }
 
-function showTab(name, btn){
+function showTab(name,btn){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   btn.classList.add('active');
@@ -523,7 +468,11 @@ function showTab(name, btn){
   if(name==='results') renderResultsTab();
 }
 
-bootApp();
+// Init
+loadRemoteData().then(()=>{
+  renderStandings();
+  renderPredictTab();
+});
 </script>
 </body>
 </html>
